@@ -18,7 +18,11 @@ $can_view = false;
 if (!empty($survey['results_open'])) {
     $can_view = true;
 } elseif ($u) {
-    if (!empty($u['can_view_all_results']) || $survey['user_id'] == $u['id']) {
+    $is_owner = ((int)$survey['user_id'] === (int)$u['id']);
+    $has_all = !empty($u['can_view_all_results']);
+    $has_own = !empty($u['can_view_own_results']);
+
+    if ($has_all || ($has_own && $is_owner)) {
         $can_view = true;
     }
 }
@@ -28,7 +32,7 @@ if (!$can_view) {
     die("Access Denied: Results for this survey are restricted.");
 }
 
-$can_export = $u && !empty($u['can_export_results']);
+$can_export = $u && (!empty($u['can_export_results']) || !empty($u['can_view_all_results']));
 $can_see_identities = $u && !empty($u['can_view_respondent_identities']);
 
 $count_stmt = $pdo->prepare("SELECT COUNT(*) FROM responses WHERE survey_id = ?");
