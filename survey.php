@@ -29,22 +29,10 @@ if (!empty($raw_auth)) {
     $captured_identity = strtolower($_SESSION['user']['username']);
 }
 
-// Enforce One Survey Per Person policy
+// Enforce One Survey Per Person policy (Only via browser cookie)
 $already_completed = false;
 if (empty($survey['allow_multiple'])) {
     if (!empty($device_cookie)) {$already_completed = true;
-    }
-    if (!$already_completed && !empty($captured_identity)) {
-        $chk_user =$pdo->prepare("SELECT id FROM responses WHERE survey_id = ? AND respondent_username = ? LIMIT 1");
-        $chk_user->execute([$survey['id'],$captured_identity]);
-        if ($chk_user->fetch()) {$already_completed = true;
-        }
-    }
-    if (!$already_completed && !empty($client_ip) &&$client_ip !== 'UNKNOWN') {
-        $chk_ip =$pdo->prepare("SELECT id FROM responses WHERE survey_id = ? AND ip_address = ? LIMIT 1");
-        $chk_ip->execute([$survey['id'],$client_ip]);
-        if ($chk_ip->fetch()) {$already_completed = true;
-        }
     }
 }
 
@@ -69,9 +57,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $active = is_question_active($q,$submitted_answers);
 
             if ($active &&$q['is_required']) {
- if ($val === null || (is_string($val) && trim($val) === '') || (is_array($val) && empty($val))) {
+if ($val === null || (is_string($val) && trim($val) === '') || (is_array($val) && empty($val))) {
     $errors[] = "The question '" . htmlspecialchars($q['question_text']) . "' is required.";
-                }
+}
             }
         }
 
@@ -99,10 +87,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $pdo->commit();$success = true;
 
+                // Browser Cookie Cache
                 setcookie($cookie_name,$token, [
-                    'expires' => time() + (365 * 24 * 60 * 60),
-                    'path' => '/',
-                    'httponly' => true,
+                    'expires'  => time() + (365 * 24 * 60 * 60),
+                    'path'     => '/',
+                    'httponly' => false,
                     'samesite' => 'Lax'
                 ]);
             } catch (PDOException $e) {
@@ -271,164 +260,189 @@ input[type="range"]::-webkit-slider-thumb:hover {
             <a href="<?= $base_path ?>/results.php?slug=<?= urlencode($survey['slug']) ?>" class="btn">View Aggregated Results</a>
         <?php endif; ?>
     </div>
+    <script>
+        try {
+            localStorage.setItem("<?= $cookie_name ?>", "true");
+        } catch(e) {}
+    </script>
 
-<?php elseif ($already_completed): ?>
-    <div style="text-align: center; padding: 48px 24px; background: var(--warning-light); border: 1.5px solid #fde68a; border-radius: var(--radius-lg);">
+<?php else: ?>
+
+    <!-- Already Completed Block (Shown if cookie exists, or revealed by JS localStorage check) -->
+    <div id="already-completed-card" style="text-align: center; padding: 48px 24px; background: var(--warning-light); border: 1.5px solid #fde68a; border-radius: var(--radius-lg); <?= $already_completed ? 'display: block;' : 'display: none;'; ?>">
         <div style="font-size: 2.2rem; margin-bottom: 12px;">🔒</div>
         <h2 style="margin: 0 0 8px 0; color: #92400e;">Survey Already Completed</h2>
         <p style="margin: 0 auto 24px auto; max-width: 500px; color: #78350f; font-size: 0.95rem; line-height: 1.6;">
-            Our records indicate that you, this device, or your local network have already submitted a response for this survey.
+            Our records indicate that this browser has already submitted a response for this survey.
         </p>
         <?php if ($survey['results_open'] || current_user()): ?>
             <a href="<?= $base_path ?>/results.php?slug=<?= urlencode($survey['slug']) ?>" class="btn btn-secondary">View Live Results</a>
         <?php endif; ?>
     </div>
 
-<?php else: ?>
-    <?php if (!empty($errors)): ?>
-        <div class="alert alert-error">
-            <span style="font-size: 1.2em; margin-right: 10px;">⚠️</span>
-            <div>
-                <strong>Please complete all required fields:</strong>
-                <ul style="margin: 4px 0 0 0; padding-left: 20px;">
-                    <?php foreach ($errors as$err): ?>
-                        <li><?= htmlspecialchars($err) ?></li>
-                    <?php endforeach; ?>
-                </ul>
-            </div>
-        </div>
-    <?php endif; ?>
-
-    <form method="POST" action="<?= htmlspecialchars($survey_action_url) ?>" id="survey-form">
-        <?php foreach ($questions as $qIdx =>$q): ?>
-            <div class="question-card question-block" 
-                 id="q-block-<?= $q['id'] ?>"
-                 data-qid="<?= $q['id'] ?>"
-                 data-parent-id="<?= htmlspecialchars($q['parent_question_id'] ?? '') ?>"
-                 data-condition-val="<?= htmlspecialchars($q['condition_value'] ?? '') ?>">
-                
-                <div class="question-number">Question <?= $qIdx + 1 ?></div>
-                <div class="question-prompt">
-                    <?= htmlspecialchars($q['question_text']) ?>
-                    <?php if ($q['is_required']): ?>
-                        <span style="color: var(--danger); font-size: 1.1em;" title="Required">*</span>
-                    <?php endif; ?>
-                </div>
-
-                <!-- 1. TEXT INPUT -->
-                <?php if ($q['type'] === 'text'): ?>
-                    <input type="text" name="answers[<?= $q['id'] ?>]" placeholder="Type your answer here..." value="<?= htmlspecialchars($_POST['answers'][$q['id']] ?? '') ?>">
-
-                <!-- 2. RADIO BUTTONS (CARD TILES) -->
-                <?php elseif ($q['type'] === 'radio'): ?>
-                    <?php $options = json_decode($q['options_json'] ?? '[]', true) ?: []; ?>
-                    <div>
-                        <?php foreach ($options as$opt): ?>
-                            <?php $checked = (isset($_POST['answers'][$q['id']]) &&$_POST['answers'][$q['id']] ===$opt); ?>
-                            <label class="option-tile <?= $checked ? 'selected' : '' ?>">
-                                <input type="radio" name="answers[<?= $q['id'] ?>]" value="<?= htmlspecialchars($opt) ?>" <?= $checked ? 'checked' : '' ?> onchange="updateTileStyles(this)">
-                                <span style="font-weight: 500; font-size: 0.95rem;"><?= htmlspecialchars($opt) ?></span>
-                            </label>
-                        <?php endforeach; ?>
-                    </div>
-
-                <!-- 3. CHECKBOXES (CARD TILES) -->
-                <?php elseif ($q['type'] === 'checkbox'): ?>
-                    <?php $options = json_decode($q['options_json'] ?? '[]', true) ?: []; ?>
-                    <div>
-                        <?php foreach ($options as$opt): ?>
-                            <?php $checked = (isset($_POST['answers'][$q['id']]) && is_array($_POST['answers'][$q['id']]) && in_array($opt, $_POST['answers'][$q['id']])); ?>
-                            <label class="option-tile <?= $checked ? 'selected' : '' ?>">
-                                <input type="checkbox" name="answers[<?= $q['id'] ?>][]" value="<?= htmlspecialchars($opt) ?>" <?= $checked ? 'checked' : '' ?> onchange="updateTileStyles(this)">
-                                <span style="font-weight: 500; font-size: 0.95rem;"><?= htmlspecialchars($opt) ?></span>
-                            </label>
-                        <?php endforeach; ?>
-                    </div>
-
-                <!-- 4. DROPDOWN -->
-                <?php elseif ($q['type'] === 'dropdown'): ?>
-                    <?php $options = json_decode($q['options_json'] ?? '[]', true) ?: []; ?>
-                    <select name="answers[<?= $q['id'] ?>]">
-                        <option value="">-- Choose an option --</option>
-                        <?php foreach ($options as$opt): ?>
-                            <option value="<?= htmlspecialchars($opt) ?>" <?= (isset($_POST['answers'][$q['id']]) &&$_POST['answers'][$q['id']] ===$opt) ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($opt) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-
-                <!-- 5. RANKING -->
-                <?php elseif ($q['type'] === 'ranking'): ?>
-                    <?php 
-                    $items = json_decode($q['options_json'] ?? '[]', true) ?: [];
-                    if (!empty($_POST['answers'][$q['id']])) {
-                        $saved_items = array_map('trim', explode('\vert{}',$_POST['answers'][$q['id']]));$clean_saved = [];
-                        foreach ($saved_items as$si) {
-                            $clean_saved[] = preg_replace('/^\d+\.\s*/', '',$si);
-                        }
-                        if (count($clean_saved) === count($items)) {
-                            $items =$clean_saved;
-                        }
-                    }
-                    ?>
-                    <p style="font-size: 0.85rem; color: var(--slate-500); margin: 0 0 10px 0;">
-                        Drag items or use the arrows to rank in order of priority:
-                    </p>
-                    <ul class="rank-list" id="rank-list-<?= $q['id'] ?>">
-                        <?php foreach ($items as $rIdx =>$item): ?>
-                            <li class="rank-item" draggable="true" data-value="<?= htmlspecialchars($item) ?>">
-                                <div style="display: flex; align-items: center;">
-                                    <span class="rank-index"><?= $rIdx + 1 ?></span>
-                                    <span style="font-weight: 600; font-size: 0.95rem; color: var(--slate-800);"><?= htmlspecialchars($item) ?></span>
-                                </div>
-                                <div>
-                                    <button type="button" class="btn btn-secondary btn-mini" onclick="moveRankItem(this, -1)">▲</button>
-                                    <button type="button" class="btn btn-secondary btn-mini" onclick="moveRankItem(this, 1)">▼</button>
-                                </div>
-                            </li>
+    <!-- Main Survey Form Block -->
+    <div id="survey-form-wrapper" style="<?= $already_completed ? 'display: none;' : 'display: block;'; ?>">
+        <?php if (!empty($errors)): ?>
+            <div class="alert alert-error">
+                <span style="font-size: 1.2em; margin-right: 10px;">⚠️</span>
+                <div>
+                    <strong>Please complete all required fields:</strong>
+                    <ul style="margin: 4px 0 0 0; padding-left: 20px;">
+                        <?php foreach ($errors as$err): ?>
+                            <li><?= htmlspecialchars($err) ?></li>
                         <?php endforeach; ?>
                     </ul>
-                    <input type="hidden" name="answers[<?= $q['id'] ?>]" id="rank-input-<?= $q['id'] ?>">
-
-                <!-- 6. SLIDER / RATING SCALE -->
-                <?php elseif ($q['type'] === 'scale'): ?>
-                    <?php 
-                    $scale = json_decode($q['options_json'] ?? '{}', true) ?: [];$min = isset($scale['min']) ? (int)$scale['min'] : 1;
-                    $max = isset($scale['max']) ? (int)$scale['max'] : 10;
-                    if ($max <=$min) $max =$min + 1;
-                    $min_lbl = $scale['min_label'] ?? '';$max_lbl = $scale['max_label'] ?? '';$midpoint = (int)round(($min +$max) / 2);
-                    $current_val = isset($_POST['answers'][$q['id']]) ? (int)$_POST['answers'][$q['id']] :$midpoint;
-                    ?>
-                    <div class="slider-shell">
-                        <div class="slider-head">
-                            <span style="font-size: 0.9rem; font-weight: 600; color: var(--slate-600);">Selected Rating:</span>
-                            <span class="score-pill" id="scale-badge-<?= $q['id'] ?>"><?= $current_val ?></span>
-                        </div>
-                        <input type="range" 
-                               name="answers[<?= $q['id'] ?>]" 
-                               id="scale-slider-<?= $q['id'] ?>"
-                               min="<?= $min ?>" 
-                               max="<?= $max ?>" 
-                               step="1" 
-                               value="<?= $current_val ?>"
-                               oninput="document.getElementById('scale-badge-<?= $q['id'] ?>').textContent = this.value">
-                        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--slate-500); font-weight: 500; margin-top: 6px;">
-                            <span><?= $min ?><?= $min_lbl ? ' &mdash; ' . htmlspecialchars($min_lbl) : '' ?></span>
-                            <span><?= $max_lbl ? htmlspecialchars($max_lbl) . ' &mdash; ' : '' ?><?=$max ?></span>
-                        </div>
-                    </div>
-                <?php endif; ?>
+                </div>
             </div>
-        <?php endforeach; ?>
+        <?php endif; ?>
 
-        <div style="margin-top: 36px;">
-            <button type="submit" class="btn" style="padding: 12px 28px; font-size: 1rem;">
-                Submit Survey &rarr;
-            </button>
-        </div>
-    </form>
+        <form method="POST" action="<?= htmlspecialchars($survey_action_url) ?>" id="survey-form">
+            <?php foreach ($questions as $qIdx =>$q): ?>
+                <div class="question-card question-block" 
+                     id="q-block-<?= $q['id'] ?>"
+                     data-qid="<?= $q['id'] ?>"
+                     data-parent-id="<?= htmlspecialchars($q['parent_question_id'] ?? '') ?>"
+                     data-condition-val="<?= htmlspecialchars($q['condition_value'] ?? '') ?>">
+                    
+                    <div class="question-number">Question <?= $qIdx + 1 ?></div>
+                    <div class="question-prompt">
+                        <?= htmlspecialchars($q['question_text']) ?>
+                        <?php if ($q['is_required']): ?>
+                            <span style="color: var(--danger); font-size: 1.1em;" title="Required">*</span>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- 1. TEXT INPUT -->
+                    <?php if ($q['type'] === 'text'): ?>
+                        <input type="text" name="answers[<?= $q['id'] ?>]" placeholder="Type your answer here..." value="<?= htmlspecialchars($_POST['answers'][$q['id']] ?? '') ?>">
+
+                    <!-- 2. RADIO BUTTONS (CARD TILES) -->
+                    <?php elseif ($q['type'] === 'radio'): ?>
+                        <?php $options = json_decode($q['options_json'] ?? '[]', true) ?: []; ?>
+                        <div>
+                            <?php foreach ($options as$opt): ?>
+                                <?php $checked = (isset($_POST['answers'][$q['id']]) &&$_POST['answers'][$q['id']] ===$opt); ?>
+                                <label class="option-tile <?= $checked ? 'selected' : '' ?>">
+                                    <input type="radio" name="answers[<?= $q['id'] ?>]" value="<?= htmlspecialchars($opt) ?>" <?= $checked ? 'checked' : '' ?> onchange="updateTileStyles(this)">
+                                    <span style="font-weight: 500; font-size: 0.95rem;"><?= htmlspecialchars($opt) ?></span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+
+                    <!-- 3. CHECKBOXES (CARD TILES) -->
+                    <?php elseif ($q['type'] === 'checkbox'): ?>
+                        <?php $options = json_decode($q['options_json'] ?? '[]', true) ?: []; ?>
+                        <div>
+                            <?php foreach ($options as$opt): ?>
+                                <?php $checked = (isset($_POST['answers'][$q['id']]) && is_array($_POST['answers'][$q['id']]) && in_array($opt, $_POST['answers'][$q['id']])); ?>
+                                <label class="option-tile <?= $checked ? 'selected' : '' ?>">
+                                    <input type="checkbox" name="answers[<?= $q['id'] ?>][]" value="<?= htmlspecialchars($opt) ?>" <?= $checked ? 'checked' : '' ?> onchange="updateTileStyles(this)">
+                                    <span style="font-weight: 500; font-size: 0.95rem;"><?= htmlspecialchars($opt) ?></span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+
+                    <!-- 4. DROPDOWN -->
+                    <?php elseif ($q['type'] === 'dropdown'): ?>
+                        <?php $options = json_decode($q['options_json'] ?? '[]', true) ?: []; ?>
+                        <select name="answers[<?= $q['id'] ?>]">
+                            <option value="">-- Choose an option --</option>
+                            <?php foreach ($options as$opt): ?>
+                                <option value="<?= htmlspecialchars($opt) ?>" <?= (isset($_POST['answers'][$q['id']]) &&$_POST['answers'][$q['id']] ===$opt) ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($opt) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+
+                    <!-- 5. RANKING -->
+                    <?php elseif ($q['type'] === 'ranking'): ?>
+                        <?php 
+                        $items = json_decode($q['options_json'] ?? '[]', true) ?: [];
+                        if (!empty($_POST['answers'][$q['id']])) {
+                            $saved_items = array_map('trim', explode('|', $_POST['answers'][$q['id']]));
+                            foreach ($saved_items as$si) {
+                                $clean_saved[] = preg_replace('/^\d+\.\s*/', '',$si);
+                            }
+                            if (count($clean_saved) === count($items)) {
+                                $items =$clean_saved;
+                            }
+                        }
+                        ?>
+                        <p style="font-size: 0.85rem; color: var(--slate-500); margin: 0 0 10px 0;">
+                            Drag items or use the arrows to rank in order of priority:
+                        </p>
+                        <ul class="rank-list" id="rank-list-<?= $q['id'] ?>">
+                            <?php foreach ($items as $rIdx =>$item): ?>
+                                <li class="rank-item" draggable="true" data-value="<?= htmlspecialchars($item) ?>">
+                                    <div style="display: flex; align-items: center;">
+                                        <span class="rank-index"><?= $rIdx + 1 ?></span>
+                                        <span style="font-weight: 600; font-size: 0.95rem; color: var(--slate-800);"><?= htmlspecialchars($item) ?></span>
+                                    </div>
+                                    <div>
+                                        <button type="button" class="btn btn-secondary btn-mini" onclick="moveRankItem(this, -1)">▲</button>
+                                        <button type="button" class="btn btn-secondary btn-mini" onclick="moveRankItem(this, 1)">▼</button>
+                                    </div>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                        <input type="hidden" name="answers[<?= $q['id'] ?>]" id="rank-input-<?= $q['id'] ?>">
+
+                    <!-- 6. SLIDER / RATING SCALE -->
+                    <?php elseif ($q['type'] === 'scale'): ?>
+                        <?php 
+                        $scale = json_decode($q['options_json'] ?? '{}', true) ?: [];$min = isset($scale['min']) ? (int)$scale['min'] : 1;
+                        $max = isset($scale['max']) ? (int)$scale['max'] : 10;
+                        if ($max <=$min) $max =$min + 1;
+                        $min_lbl = $scale['min_label'] ?? '';$max_lbl = $scale['max_label'] ?? '';$midpoint = (int)round(($min +$max) / 2);
+                        $current_val = isset($_POST['answers'][$q['id']]) ? (int)$_POST['answers'][$q['id']] :$midpoint;
+                        ?>
+                        <div class="slider-shell">
+                            <div class="slider-head">
+                                <span style="font-size: 0.9rem; font-weight: 600; color: var(--slate-600);">Selected Rating:</span>
+                                <span class="score-pill" id="scale-badge-<?= $q['id'] ?>"><?= $current_val ?></span>
+                            </div>
+                            <input type="range" 
+                                   name="answers[<?= $q['id'] ?>]" 
+                                   id="scale-slider-<?= $q['id'] ?>"
+                                   min="<?= $min ?>" 
+                                   max="<?= $max ?>" 
+                                   step="1" 
+                                   value="<?= $current_val ?>"
+                                   oninput="document.getElementById('scale-badge-<?= $q['id'] ?>').textContent = this.value">
+                            <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--slate-500); font-weight: 500; margin-top: 6px;">
+                                <span><?= $min ?><?= $min_lbl ? ' &mdash; ' . htmlspecialchars($min_lbl) : '' ?></span>
+                                <span><?= $max_lbl ? htmlspecialchars($max_lbl) . ' &mdash; ' : '' ?><?=$max ?></span>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            <?php endforeach; ?>
+
+            <div style="margin-top: 36px;">
+                <button type="submit" class="btn" style="padding: 12px 28px; font-size: 1rem;">
+                    Submit Survey &rarr;
+                </button>
+            </div>
+        </form>
+    </div>
 
     <script>
+    // Client-side cache / LocalStorage check
+    (function checkBrowserCache() {
+        const allowMultiple = <?= !empty($survey['allow_multiple']) ? 'true' : 'false' ?>;
+        const key = "<?= $cookie_name ?>";
+        if (!allowMultiple) {
+            try {
+                if (localStorage.getItem(key) === "true") {
+                    const formWrap = document.getElementById('survey-form-wrapper');
+                    const compCard = document.getElementById('already-completed-card');
+                    if (formWrap) formWrap.style.display = 'none';
+                    if (compCard) compCard.style.display = 'block';
+                }
+            } catch(e) {}
+        }
+    })();
+
     function updateTileStyles(input) {
         if (input.type === 'radio') {
             const name = input.name;
@@ -546,8 +560,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
         });
     }
 
-    document.getElementById('survey-form').addEventListener('change', evaluateConditions);
-    document.getElementById('survey-form').addEventListener('input', evaluateConditions);
+    const surveyForm = document.getElementById('survey-form');
+    if (surveyForm) {
+        surveyForm.addEventListener('change', evaluateConditions);
+        surveyForm.addEventListener('input', evaluateConditions);
+    }
     
     updateRankInputs();
     evaluateConditions();
