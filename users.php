@@ -23,11 +23,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $last_name  = trim($_POST['last_name'] ?? '');
         $email      = trim($_POST['email'] ?? '');
 
-        $can_create      = isset($_POST['can_create_surveys']) ? 1 : 0;
-        $can_view_all    = isset($_POST['can_view_all_results']) ? 1 : 0;
-        $can_export      = isset($_POST['can_export_results']) ? 1 : 0;
-        $can_identities  = isset($_POST['can_view_respondent_identities']) ? 1 : 0;
-        $can_manage      = isset($_POST['can_manage_users']) ? 1 : 0;
+        $can_create     = isset($_POST['can_create_surveys']) ? 1 : 0;
+        $can_view_own   = isset($_POST['can_view_own_results']) ? 1 : 0;
+        $can_view_all   = isset($_POST['can_view_all_results']) ? 1 : 0;
+        $can_export     = isset($_POST['can_export_results']) ? 1 : 0;
+        $can_identities = isset($_POST['can_view_respondent_identities']) ? 1 : 0;
+        $can_manage     = isset($_POST['can_manage_users']) ? 1 : 0;
 
         if (!$username || !$password) {
             $err = 'Username and Password are required.';
@@ -36,9 +37,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $pdo->prepare("
                     INSERT INTO users (
                         username, password_hash, first_name, last_name, email,
-                        can_create_surveys, can_view_all_results, can_export_results,
-                        can_view_respondent_identities, can_manage_users
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        can_create_surveys, can_view_own_results, can_view_all_results,
+                        can_export_results, can_view_respondent_identities, can_manage_users
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ");
                 $stmt->execute([
                     $username,
@@ -47,6 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $last_name,
                     $email,
                     $can_create,
+                    $can_view_own,
                     $can_view_all,
                     $can_export,
                     $can_identities,
@@ -64,11 +66,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email      = trim($_POST['email'] ?? '');
         $password   = $_POST['password'] ?? '';
 
-        $can_create      = isset($_POST['can_create_surveys']) ? 1 : 0;
-        $can_view_all    = isset($_POST['can_view_all_results']) ? 1 : 0;
-        $can_export      = isset($_POST['can_export_results']) ? 1 : 0;
-        $can_identities  = isset($_POST['can_view_respondent_identities']) ? 1 : 0;
-        $can_manage      = isset($_POST['can_manage_users']) ? 1 : 0;
+        $can_create     = isset($_POST['can_create_surveys']) ? 1 : 0;
+        $can_view_own   = isset($_POST['can_view_own_results']) ? 1 : 0;
+        $can_view_all   = isset($_POST['can_view_all_results']) ? 1 : 0;
+        $can_export     = isset($_POST['can_export_results']) ? 1 : 0;
+        $can_identities = isset($_POST['can_view_respondent_identities']) ? 1 : 0;
+        $can_manage     = isset($_POST['can_manage_users']) ? 1 : 0;
 
         // Prevent self-lockout from user management
         if ($user_id === (int)$u['id']) {
@@ -82,6 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     last_name = ?,
                     email = ?,
                     can_create_surveys = ?,
+                    can_view_own_results = ?,
                     can_view_all_results = ?,
                     can_export_results = ?,
                     can_view_respondent_identities = ?,
@@ -93,6 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $last_name,
                 $email,
                 $can_create,
+                $can_view_own,
                 $can_view_all,
                 $can_export,
                 $can_identities,
@@ -188,6 +193,10 @@ include 'header.php';
                     Create &amp; edit surveys
                 </label>
                 <label style="font-weight: normal;">
+                    <input type="checkbox" name="can_view_own_results" value="1" <?= (!empty($editing_user['can_view_own_results'])) ? 'checked' : '' ?>>
+                    View own survey results
+                </label>
+                <label style="font-weight: normal;">
                     <input type="checkbox" name="can_view_all_results" value="1" <?= (!empty($editing_user['can_view_all_results'])) ? 'checked' : '' ?>>
                     View all survey results
                 </label>
@@ -237,6 +246,7 @@ include 'header.php';
                 <td><?= htmlspecialchars($usr['email'] ?: '—') ?></td>
                 <td>
                     <?php if (!empty($usr['can_create_surveys'])): ?><span class="badge">Create Surveys</span><?php endif; ?>
+                    <?php if (!empty($usr['can_view_own_results'])): ?><span class="badge">View Own Results</span><?php endif; ?>
                     <?php if (!empty($usr['can_view_all_results'])): ?><span class="badge">View All Results</span><?php endif; ?>
                     <?php if (!empty($usr['can_export_results'])): ?><span class="badge">Export CSV</span><?php endif; ?>
                     <?php if (!empty($usr['can_view_respondent_identities'])): ?><span class="badge">View Identities</span><?php endif; ?>
