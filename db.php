@@ -21,6 +21,7 @@ try {
                 last_name TEXT DEFAULT '',
                 email TEXT DEFAULT '',
                 can_create_surveys INTEGER NOT NULL DEFAULT 0,
+                can_view_own_results INTEGER NOT NULL DEFAULT 0,
                 can_view_all_results INTEGER NOT NULL DEFAULT 0,
                 can_export_results INTEGER NOT NULL DEFAULT 0,
                 can_view_respondent_identities INTEGER NOT NULL DEFAULT 0,
@@ -77,9 +78,9 @@ try {
         $stmt = $pdo->prepare("
             INSERT INTO users (
                 username, password_hash, first_name, last_name, email,
-                can_create_surveys, can_view_all_results, can_export_results,
+                can_create_surveys, can_view_own_results, can_view_all_results, can_export_results,
                 can_view_respondent_identities, can_manage_users
-            ) VALUES (?, ?, 'System', 'Administrator', 'admin@local.test', 1, 1, 1, 1, 1)
+            ) VALUES (?, ?, 'System', 'Administrator', 'admin@local.test', 1, 1, 1, 1, 1, 1)
         ");
         $stmt->execute(['admin', password_hash('admin123', PASSWORD_DEFAULT)]);
     } else {
@@ -109,6 +110,10 @@ try {
         }
         if (!in_array('email', $user_cols)) {
             $pdo->exec("ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''");
+        }
+        if (!in_array('can_view_own_results', $user_cols)) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN can_view_own_results INTEGER NOT NULL DEFAULT 0");
+            $pdo->exec("UPDATE users SET can_view_own_results = 1 WHERE username = 'admin'");
         }
         if (!in_array('can_export_results', $user_cols)) {
             $pdo->exec("ALTER TABLE users ADD COLUMN can_export_results INTEGER NOT NULL DEFAULT 0");
